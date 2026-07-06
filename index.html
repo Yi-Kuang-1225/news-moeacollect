@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>輿情追蹤合併資料庫 (戰略淬鍊版)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <!-- 引入 Mammoth.js 用於在前端解析 Word (.docx) 檔案 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.4.2/mammoth.browser.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        body {
+            font-family: 'Noto Sans TC', sans-serif;
+            background-color: #f8fafc; 
+            color: #334155;
+        }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        .tooltip-fade-in { animation: fadeIn 0.2s ease-in-out; }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(5px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        /* 保留 Word 換行格式 */
+        .preserve-newlines br { display: block; content: ""; margin-top: 4px; }
+    </style>
+</head>
+<body class="h-screen flex flex-col antialiased">
+
+    <header class="bg-white border-b border-slate-200 px-8 py-4 flex justify-between items-center shrink-0 shadow-sm z-10">
+        <div class="flex items-center gap-3">
+            <div class="bg-slate-800 p-2 rounded-lg text-white shadow-sm">
+                <i data-lucide="shield-half" class="w-5 h-5"></i>
+            </div>
+            <div>
+                <h1 class="text-xl font-bold text-slate-800">輿情戰略資料庫</h1>
+                <p class="text-xs text-slate-500 font-medium tracking-wide flex items-center gap-1">
+                    <span class="w-2 h-2 rounded-full bg-emerald-500"></span> 準備連線至 Google Sheets
+                </p>
+            </div>
+        </div>
+        
+        <div class="flex items-center gap-4">
+            <div class="text-sm text-slate-500 mr-4 font-medium" id="record-count">共 0 筆紀錄</div>
+            
+            <input type="file" id="word-upload" accept=".docx" class="hidden" onchange="handleFileUpload(event)">
+            <button onclick="document.getElementById('word-upload').click()" class="bg-slate-200 hover:bg-slate-300 text-slate-800 px-5 py-2.5 rounded-md text-sm font-bold transition-colors flex items-center gap-2 shadow-sm border border-slate-300">
+                <i data-lucide="file-up" class="w-4 h-4 text-slate-600"></i>
+                匯入 Word 報表 (.docx)
+            </button>
+            <button onclick="syncToGoogleSheets()" id="sync-btn" class="hidden bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 rounded-md text-sm font-bold transition-colors items-center gap-2 shadow-sm">
+                <i data-lucide="cloud-upload" class="w-4 h-4"></i>
+                同步至 Google 試算表
+            </button>
+        </div>
+    </header>
+
+    <div id="toast-container" class="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 flex flex-col gap-2"></div>
+
+    <div id="loading-overlay" class="hidden fixed inset-0 bg-slate-50/80 backdrop-blur-sm z-40 flex flex-col items-center justify-center">
+        <div class="bg-white p-6 rounded-xl shadow-xl flex flex-col items-center border border-slate-200">
+            <i data-lucide="file-search" class="w-8 h-8 text-slate-800 animate-spin mb-3"></i>
+            <p class="font-bold text-slate-800 text-lg" id="loading-text">正在精準萃取 Word 格式...</p>
+        </div>
+    </div>
+
+    <main class="flex-1 overflow-auto p-8 relative">
+        <div class="bg-white rounded-lg shadow-sm border border-slate-200">
+            <table class="w-full text-left border-collapse">
+                <thead class="bg-slate-50 sticky top-0 z-10 shadow-sm">
+                    <tr>
+                        <!-- 稍微放寬日期區間 -->
+                        <th class="py-4 px-6 font-bold text-slate-700 border-b border-slate-200 w-28">日期區間</th>
+                        <!-- 關鍵修改：將回應單位的寬度放寬 (例如 w-48 或 w-56)，讓標籤有足夠空間並排 -->
+                        <th class="py-4 px-6 font-bold text-slate-700 border-b border-slate-200 w-56 text-center">回應單位</th>
+                        <th class="py-4 px-6 font-bold text-slate-700 border-b border-slate-200 w-[25%]">爭議輿情 / 記者詢問</th>
+                        <th class="py-4 px-6 font-bold text-slate-700 border-b border-slate-200 w-[auto]">簡要應處說明及作為</th>
+                    </tr>
+                </thead>
+                <tbody id="database-body" class="divide-y divide-slate-100">
+                </tbody>
+            </table>
+            
+            <div id="empty-state" class="hidden flex flex-col items-center justify-center py-20 text-slate-400">
+                <i data-lucide="database" class="w-12 h-12 mb-3 opacity-50"></i>
+                <p>正在載入資料庫，或資料庫目前為空</p>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        lucide.createIcons();
+
+        // 這是 Google Apps Script 部署後產生的網址
+        const GOOGLE_APP_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwb3dQM7izWDrWikNyduBYKncvg1ZwktWQ74TDk7PFw5Efg5FX859v1deX4kCr3tPwo/exec"; 
+
+        // 本地暫存資料庫 (初始為空)
+        let globalDatabase = [];
+
+        // 顯示提示訊息
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            let bgClass = type === 'error' ? 'bg-red-600' : (type === 'success' ? 'bg-emerald-600' : 'bg-slate-800');
+            toast.className = `${bgClass} text-white px-6 py-3 rounded-lg shadow-lg text-sm font-bold tooltip-fade-in flex items-center gap-2`;
+            toast.innerHTML = `<i data-lucide="${type === 'error' ? 'alert-circle' : 'check-circle'}" class="w-4 h-4"></i> ${message}`;
+            container.appendChild(toast);
+            lucide.createIcons();
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                toast.style.transition = 'opacity 0.3s ease';
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+
+        function renderDatabase() {
+            const tbody = document.getElementById('database-body');
+            const emptyState = document.getElementById('empty-state');
+            
+            tbody.innerHTML = '';
+            document.getElementById('record-count').textContent = `共 ${globalDatabase.length} 筆紀錄`;
+
+            if (globalDatabase.length === 0) {
+                emptyState.classList.remove('hidden');
+                return;
+            }
+            emptyState.classList.add('hidden');
+
+            // 核心戰略：強制以日期區間進行降冪排序 (新 -> 舊)
+            // 由於日期格式為 "2026/07/06至2026/07/12"，直接使用 localeCompare 可以完美排序
+            globalDatabase.sort((a, b) => b.dateRange.localeCompare(a.dateRange));
+
+            globalDatabase.forEach((row) => {
+                // 單位標籤設計：深藍底白字，突顯責任歸屬
+                let unitTags = row.unit.split(/[、,]/).map(u => 
+                    `<span class="inline-flex items-center justify-center bg-blue-900 text-white text-xs font-bold px-3 py-1.5 rounded shadow-sm tracking-wider whitespace-nowrap">${u.trim()}</span>`
+                ).join('');
+
+                const tr = document.createElement('tr');
+                tr.className = 'hover:bg-slate-50 transition-colors border-l-4 border-transparent hover:border-slate-400';
+                
+                tr.innerHTML = `
+                    <td class="py-5 px-6 align-top text-sm font-medium text-slate-600">${row.dateRange}</td>
+                    <td class="py-5 px-6 align-top">
+                        <!-- 關鍵修改：使用 flex, justify-center(置中), gap-2(間距) 確保並排且置中 -->
+                        <div class="flex flex-wrap justify-center items-start gap-2">
+                            ${unitTags}
+                        </div>
+                    </td>
+                    <td class="py-5 px-6 align-top">
+                        <div class="font-bold text-slate-800 leading-relaxed">${row.issue}</div>
+                    </td>
+                    <td class="py-5 px-6 align-top text-sm text-slate-700 leading-relaxed pr-8 preserve-newlines">${row.response}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+            lucide.createIcons();
+        }
+
+        // 啟動時自動從 Google Sheets 載入資料
+        async function fetchFromGoogleSheets() {
+            const emptyState = document.getElementById('empty-state');
+            emptyState.classList.remove('hidden');
+            emptyState.innerHTML = `<i data-lucide="loader-2" class="w-12 h-12 mb-3 text-slate-400 animate-spin"></i><p>正在從雲端同步歷史資料庫...</p>`;
+            lucide.createIcons();
+
+            try {
+                const response = await fetch(GOOGLE_APP_SCRIPT_URL, {
+                    method: 'GET',
+                    redirect: 'follow'
+                });
+                if (!response.ok) throw new Error('網路連線異常');
+                
+                const data = await response.json();
+                
+                if (data && Array.isArray(data) && data.length > 0) {
+                    globalDatabase = data; 
+                    renderDatabase(); // render 內部已包含排序邏輯
+                    showToast("成功載入雲端資料庫", "success");
+                } else {
+                    renderDatabase(); // 資料庫為空
+                }
+            } catch (error) {
+                console.error("Fetch Error:", error);
+                emptyState.innerHTML = `
+                    <div class="text-red-500 flex flex-col items-center text-center max-w-md">
+                        <i data-lucide="shield-alert" class="w-12 h-12 mb-3 opacity-80"></i>
+                        <p class="font-bold text-lg mb-1">無法讀取雲端資料庫</p>
+                        <button onclick="fetchFromGoogleSheets()" class="mt-5 bg-slate-800 hover:bg-slate-700 text-white px-5 py-2.5 rounded-md text-sm font-medium transition-colors shadow-sm flex items-center gap-2">
+                            <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+                            重新嘗試連線
+                        </button>
+                    </div>`;
+                lucide.createIcons();
+                showToast("讀取雲端資料庫失敗，請確認 GAS 權限", "error");
+            }
+        }
+
+        window.onload = function() {
+            fetchFromGoogleSheets();
+        };
+
+        function handleFileUpload(event) {
+            const file = event.target.files[0];
+            if (!file || !file.name.endsWith('.docx')) {
+                if(file) showToast("請上傳 .docx 格式的 Word 檔案", "error");
+                return;
+            }
+
+            const overlay = document.getElementById('loading-overlay');
+            overlay.classList.remove('hidden');
+            
+            const reader = new FileReader();
+            reader.onload = function(loadEvent) {
+                const arrayBuffer = loadEvent.target.result;
+                
+                mammoth.convertToHtml({arrayBuffer: arrayBuffer})
+                    .then(function(result) {
+                        const htmlString = result.value;
+                        const parsedData = parseHtmlTable(htmlString);
+                        
+                        if(parsedData.length > 0) {
+                            // 將新資料加入陣列，隨後 renderDatabase 會自動將其依日期重新排序
+                            globalDatabase = [...parsedData, ...globalDatabase];
+                            renderDatabase();
+                            showToast("成功從 Word 匯入 " + parsedData.length + " 筆資料！", "success");
+                            
+                            // 顯示同步按鈕
+                            document.getElementById('sync-btn').classList.remove('hidden');
+                            document.getElementById('sync-btn').classList.add('flex');
+                        } else {
+                            showToast("未能從檔案中找到符合格式的表格", "error");
+                        }
+                    })
+                    .catch(function(err) {
+                        console.error(err);
+                        showToast("Word 解析失敗，請確認檔案結構", "error");
+                    })
+                    .finally(() => {
+                        overlay.classList.add('hidden');
+                        event.target.value = ''; // 重置 input
+                    });
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        // 萃取器 (保持原有的精準萃取邏輯，隱藏原本的狀態欄位資料)
+        function parseHtmlTable(htmlString) {
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(htmlString, "text/html");
+            const newData = [];
+
+            let globalDate = "本週新增";
+            const paragraphs = doc.querySelectorAll('p');
+            for(let p of paragraphs) {
+                const text = p.textContent;
+                if(text.includes('每週輿情預判') && text.includes('（')) {
+                    const match = text.match(/（(.*?)）/);
+                    if(match) globalDate = match[1];
+                    break;
+                }
+            }
+
+            const tables = doc.querySelectorAll('table');
+            if(tables.length === 0) return newData;
+
+            const rows = tables[0].querySelectorAll('tr');
+            
+            for(let i = 1; i < rows.length; i++) {
+                const cells = rows[i].querySelectorAll('td');
+                if(cells.length >= 3) {
+                    const col1 = cells[0].textContent.trim();
+                    let col2 = cells[1].innerHTML.replace(/<p>/g, '').replace(/<\/p>/g, '<br>').trim();
+                    if(col2.endsWith('<br>')) col2 = col2.slice(0, -4);
+                    const col3 = cells[2].textContent.trim();
+
+                    if(!col1 && !col2) continue; 
+
+                    let unit = "未註明";
+                    let issue = col1;
+                    const unitMatch = col1.match(/【(.*?)】/);
+                    if(unitMatch) {
+                        unit = unitMatch[1];
+                        issue = col1.replace(/【.*?】/, '').trim();
+                    }
+
+                    let expectedDate = "";
+                    let status = "";
+                    const statusParts = col3.split(/[\s　]+/); 
+                    if(statusParts.length >= 2) {
+                        expectedDate = statusParts[0];
+                        status = statusParts.slice(1).join(" ");
+                    } else {
+                        status = col3;
+                    }
+
+                    // 即使畫面不顯示，我們依然將 status 和 expectedDate 提取出來存入物件，
+                    // 確保未來若需要在後端 Google Sheets 查閱時，資料仍是完整的。
+                    newData.push({
+                        id: "DOC-" + Date.now() + "-" + i,
+                        dateRange: globalDate,
+                        unit: unit,
+                        issue: issue,
+                        response: col2,
+                        status: status || "持續關注", 
+                        expectedDate: expectedDate
+                    });
+                }
+            }
+            return newData;
+        }
+
+        async function syncToGoogleSheets() {
+            if(!GOOGLE_APP_SCRIPT_URL) return;
+
+            const btn = document.getElementById('sync-btn');
+            btn.innerHTML = `<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> 同步中...`;
+            
+            try {
+                // 將所有資料寫回。如果資料庫龐大，實務上可改為只傳送"新增"的陣列
+                const response = await fetch(GOOGLE_APP_SCRIPT_URL, {
+                    method: 'POST',
+                    mode: 'no-cors',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(globalDatabase)
+                });
+                
+                showToast("已成功同步至 Google 試算表！", "success");
+                btn.innerHTML = `<i data-lucide="cloud-check" class="w-4 h-4"></i> 同步完成`;
+                setTimeout(() => {
+                    btn.classList.add('hidden');
+                    btn.classList.remove('flex');
+                    btn.innerHTML = `<i data-lucide="cloud-upload" class="w-4 h-4"></i> 同步至 Google 試算表`;
+                }, 3000);
+
+            } catch(e) {
+                showToast("同步失敗，請檢查網路連線", "error");
+                btn.innerHTML = `<i data-lucide="cloud-upload" class="w-4 h-4"></i> 重新同步`;
+            }
+        }
+    </script>
+</body>
+</html>
