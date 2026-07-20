@@ -3,10 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>輿情戰略資料庫-1 (進階管理版)</title>
+    <title>輿情戰略資料庫 (人工檢視版)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&display=swap" rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.4.2/mammoth.browser.min.js"></script>
+    <!-- 引入圖示庫 -->
     <script src="https://unpkg.com/lucide@latest"></script>
     <style>
         body { font-family: 'Noto Sans TC', sans-serif; background-color: #f8fafc; color: #334155; }
@@ -19,7 +20,7 @@
             to { opacity: 1; transform: translateY(0); }
         }
         .preserve-newlines br { display: block; content: ""; margin-top: 4px; }
-        .modal-fade-in { animation: modalFadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
+        .modal-fade-in { animation: modalFadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1); }
         @keyframes modalFadeIn {
             from { opacity: 0; transform: translate(-50%, -48%) scale(0.96); }
             to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
@@ -37,7 +38,7 @@
                 <h1 class="text-xl font-bold text-slate-800">輿情戰略資料庫</h1>
                 <p class="text-xs text-slate-500 font-medium tracking-wide flex items-center gap-1">
                     <span class="w-2 h-2 rounded-full bg-emerald-500" id="connection-status"></span> 
-                    <span id="connection-text">連線狀態：正常</span>
+                    <span id="connection-text">準備連線至 Google Sheets</span>
                 </p>
             </div>
         </div>
@@ -45,19 +46,13 @@
         <div class="flex items-center gap-3 flex-wrap">
             <div class="text-sm text-slate-500 font-medium px-2" id="record-count">共 0 筆紀錄</div>
             
-            <button onclick="openDuplicateModal()" id="btn-duplicate-manage" class="hidden relative bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 px-4 py-2.5 rounded-md text-sm font-bold transition-colors flex items-center gap-2 shadow-sm">
-                <i data-lucide="copy-minus" class="w-4 h-4"></i>
-                處理重複
-                <span id="duplicate-badge" class="absolute -top-2 -right-2 bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-sm">0</span>
-            </button>
-            
             <input type="file" id="word-upload" accept=".docx" class="hidden" onchange="handleFileUpload(event)">
             <button onclick="document.getElementById('word-upload').click()" class="bg-slate-200 hover:bg-slate-300 text-slate-800 px-4 py-2.5 rounded-md text-sm font-bold transition-colors flex items-center gap-2 shadow-sm border border-slate-300">
                 <i data-lucide="file-up" class="w-4 h-4 text-slate-600"></i>
-                匯入 Word
+                匯入 Word 檔案
             </button>
             
-            <button onclick="syncToGoogleSheets()" id="sync-btn" class="hidden bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-md text-sm font-bold transition-colors items-center gap-2 shadow-sm">
+            <button onclick="syncToGoogleSheets()" id="sync-btn" class="hidden bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-md text-sm font-bold transition-colors items-center gap-2 shadow-sm animate-pulse">
                 <i data-lucide="cloud-upload" class="w-4 h-4"></i>
                 同步至雲端
             </button>
@@ -83,6 +78,7 @@
                             <th class="py-4 px-6 font-bold text-slate-700 border-b border-slate-200 w-48 text-center">回應單位</th>
                             <th class="py-4 px-6 font-bold text-slate-700 border-b border-slate-200 w-[25%]">爭議輿情 / 記者詢問</th>
                             <th class="py-4 px-6 font-bold text-slate-700 border-b border-slate-200 w-auto">簡要應處說明及作為</th>
+                            <th class="py-4 px-4 font-bold text-slate-700 border-b border-slate-200 w-20 text-center">操作</th>
                         </tr>
                     </thead>
                     <tbody id="database-body" class="divide-y divide-slate-100">
@@ -98,38 +94,38 @@
         </div>
     </main>
 
-    <div id="duplicate-modal-backdrop" class="hidden fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[70] transition-opacity"></div>
-    
-    <div id="duplicate-modal" class="hidden fixed fixed-center z-[80] w-[95%] max-w-5xl max-h-[85vh] bg-white rounded-xl shadow-2xl border border-slate-200 flex-col modal-fade-in">
-        <div class="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50/50 rounded-t-xl shrink-0">
-            <div class="flex items-center gap-2 text-amber-700">
-                <i data-lucide="copy-minus" class="w-5 h-5"></i>
-                <h2 class="text-lg font-bold">重複項目比對與清理</h2>
-                <span id="modal-duplicate-count" class="bg-amber-100 text-amber-800 text-xs px-2 py-0.5 rounded-full font-bold ml-2"></span>
+    <div id="delete-modal-backdrop" class="hidden fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[70] transition-opacity"></div>
+    <div id="delete-modal" class="hidden fixed fixed-center z-[80] w-[90%] max-w-sm bg-white rounded-2xl shadow-2xl border border-slate-200 flex-col modal-fade-in">
+        <div class="p-6 text-center">
+            <div class="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-4 text-red-500">
+                <i data-lucide="trash-2" class="w-8 h-8"></i>
             </div>
-            <button onclick="closeDuplicateModal()" class="text-slate-400 hover:text-slate-700 transition-colors p-1 rounded-md hover:bg-slate-200">
-                <i data-lucide="x" class="w-5 h-5"></i>
-            </button>
-        </div>
-        
-        <div class="flex-1 overflow-y-auto p-6 bg-slate-50/50" id="duplicate-groups-container">
-            <!-- 重複群組將在這裡生成 -->
-        </div>
-        
-        <div class="px-6 py-4 border-t border-slate-100 bg-white rounded-b-xl flex justify-end shrink-0">
-            <button onclick="closeDuplicateModal()" class="bg-slate-800 hover:bg-slate-700 text-white px-5 py-2 rounded-md text-sm font-bold transition-colors shadow-sm">
-                完成清理
-            </button>
+            <h3 class="text-xl font-bold text-slate-800 mb-2">確定刪除紀錄？</h3>
+            <p class="text-sm text-slate-500 mb-6 leading-relaxed">這筆資料將從主畫面中移除。<br>請記得點擊右上角的「<span class="font-bold text-slate-700">同步至雲端</span>」才能將變更儲存到資料庫。</p>
+            <div class="flex justify-center gap-3">
+                <button onclick="closeDeleteModal()" class="flex-1 py-2.5 rounded-lg text-sm font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-colors">取消</button>
+                <button onclick="executeDelete()" class="flex-1 py-2.5 rounded-lg text-sm font-bold text-white bg-red-500 hover:bg-red-600 shadow-sm transition-colors">確定刪除</button>
+            </div>
         </div>
     </div>
 
     <script>
-        lucide.createIcons();
+        // 安全刷新圖示的函式 (防呆：避免圖示庫載入失敗導致系統崩潰)
+        function refreshIcons() {
+            if (typeof lucide !== 'undefined') {
+                lucide.createIcons();
+            }
+        }
+        
+        // 初始載入
+        document.addEventListener("DOMContentLoaded", () => {
+            refreshIcons();
+        });
 
         const GOOGLE_APP_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwb3dQM7izWDrWikNyduBYKncvg1ZwktWQ74TDk7PFw5Efg5FX859v1deX4kCr3tPwo/exec"; 
         
         let globalDatabase = [];
-        let duplicateData = {}; // 存放分組後的重複資料
+        let recordToDeleteId = null; // 記錄準備刪除的資料ID
 
         function showToast(message, type = 'info') {
             const container = document.getElementById('toast-container');
@@ -138,7 +134,8 @@
             toast.className = `${bgClass} text-white px-6 py-3 rounded-lg shadow-lg text-sm font-bold tooltip-fade-in flex items-center gap-2`;
             toast.innerHTML = `<i data-lucide="${type === 'error' ? 'alert-circle' : 'check-circle'}" class="w-4 h-4"></i> ${message}`;
             container.appendChild(toast);
-            lucide.createIcons();
+            refreshIcons();
+            
             setTimeout(() => {
                 toast.style.opacity = '0';
                 toast.style.transition = 'opacity 0.3s ease';
@@ -158,9 +155,11 @@
                 emptyState.classList.add('flex');
                 return;
             }
+            
             emptyState.classList.add('hidden');
             emptyState.classList.remove('flex');
 
+            // 依日期區間排序 (新到舊)
             globalDatabase.sort((a, b) => b.dateRange.localeCompare(a.dateRange));
 
             globalDatabase.forEach((row) => {
@@ -169,7 +168,7 @@
                 ).join('');
 
                 const tr = document.createElement('tr');
-                tr.className = `transition-colors border-l-4 hover:border-slate-400 ${row.reviewed ? 'bg-slate-50/50 border-emerald-400' : 'hover:bg-slate-50 border-transparent'}`;
+                tr.className = `transition-colors border-l-4 border-transparent hover:border-slate-400 hover:bg-slate-50`;
                 
                 tr.innerHTML = `
                     <td class="py-5 px-6 align-top text-sm font-medium text-slate-600">${row.dateRange}</td>
@@ -180,197 +179,45 @@
                     </td>
                     <td class="py-5 px-6 align-top">
                         <div class="font-bold text-slate-800 leading-relaxed">${row.issue}</div>
-                        ${row.reviewed ? '<span class="inline-block mt-2 text-[10px] bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-bold">已確認</span>' : ''}
                     </td>
                     <td class="py-5 px-6 align-top text-sm text-slate-700 leading-relaxed pr-8 preserve-newlines">${row.response}</td>
+                    
+                    <td class="py-5 px-4 align-top text-center">
+                        <button onclick="confirmDelete('${row.id}')" class="text-slate-400 hover:text-red-500 hover:bg-red-50 p-2 rounded-lg transition-colors border border-transparent hover:border-red-200" title="刪除此紀錄">
+                            <i data-lucide="trash-2" class="w-5 h-5"></i>
+                        </button>
+                    </td>
                 `;
                 tbody.appendChild(tr);
             });
-            lucide.createIcons();
-            
-            // 每次渲染完更新重複偵測
-            updateDuplicateStatus();
+            refreshIcons();
         }
 
-        function updateDuplicateStatus() {
-            const redundantCount = analyzeDuplicates();
-            const btn = document.getElementById('btn-duplicate-manage');
-            const badge = document.getElementById('duplicate-badge');
-            
-            if (redundantCount > 0) {
-                btn.classList.remove('hidden');
-                badge.textContent = redundantCount;
-            } else {
-                btn.classList.add('hidden');
-                // 若面板開啟中但已無重複，則自動關閉
-                if (!document.getElementById('duplicate-modal').classList.contains('hidden')) {
-                    closeDuplicateModal();
-                }
-            }
-        }
-
-        function analyzeDuplicates() {
-            const groups = {};
-            globalDatabase.forEach(item => {
-                if (item.reviewed) return; // 跳過已人工確認或已合併的項目
-                const key = item.issue.trim();
-                if (!groups[key]) groups[key] = [];
-                groups[key].push(item);
-            });
-
-            duplicateData = {};
-            let redundantCount = 0;
-            for (let key in groups) {
-                if (groups[key].length > 1) {
-                    duplicateData[key] = groups[key];
-                    redundantCount += (groups[key].length - 1);
-                }
-            }
-            return redundantCount;
-        }
-
-        function openDuplicateModal() {
-            document.getElementById('duplicate-modal-backdrop').classList.remove('hidden');
-            const modal = document.getElementById('duplicate-modal');
+        function confirmDelete(id) {
+            recordToDeleteId = id;
+            document.getElementById('delete-modal-backdrop').classList.remove('hidden');
+            const modal = document.getElementById('delete-modal');
             modal.classList.remove('hidden');
             modal.classList.add('flex');
-            renderDuplicateGroups();
         }
 
-        function closeDuplicateModal() {
-            document.getElementById('duplicate-modal-backdrop').classList.add('hidden');
-            const modal = document.getElementById('duplicate-modal');
+        function closeDeleteModal() {
+            recordToDeleteId = null;
+            document.getElementById('delete-modal-backdrop').classList.add('hidden');
+            const modal = document.getElementById('delete-modal');
             modal.classList.add('hidden');
             modal.classList.remove('flex');
         }
 
-        function renderDuplicateGroups() {
-            const container = document.getElementById('duplicate-groups-container');
-            container.innerHTML = '';
-            
-            let totalRedundant = 0;
-            
-            for (let issue in duplicateData) {
-                const items = duplicateData[issue];
-                totalRedundant += (items.length - 1);
-                
-                // 依日期排序，確保最新的一筆在最前面
-                items.sort((a, b) => b.dateRange.localeCompare(a.dateRange));
-                const newestItem = items[0];
-                
-                const groupDiv = document.createElement('div');
-                groupDiv.className = 'bg-white rounded-lg shadow-sm border border-slate-200 mb-6 overflow-hidden';
-                
-                // 標題列 + 快捷按鈕
-                let html = `
-                    <div class="bg-slate-100/80 px-5 py-3 border-b border-slate-200 flex justify-between items-start gap-4">
-                        <div class="flex-1">
-                            <h3 class="font-bold text-slate-800 text-sm leading-relaxed">${issue}</h3>
-                            <p class="text-xs text-slate-500 mt-1">發現 ${items.length} 筆相似紀錄</p>
-                        </div>
-                        <div class="flex gap-2 shrink-0">
-                            <button onclick="markAsReviewed('${issue.replace(/'/g, "\\'")}')" class="bg-white border border-slate-300 hover:bg-slate-50 text-slate-600 px-3 py-1.5 rounded text-xs font-bold transition-colors shadow-sm flex items-center gap-1">
-                                <i data-lucide="check" class="w-3 h-3"></i> 標示已確認 (不刪除)
-                            </button>
-                            <button onclick="mergeDuplicateRecords('${issue.replace(/'/g, "\\'")}')" class="bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 px-3 py-1.5 rounded text-xs font-bold transition-colors shadow-sm flex items-center gap-1">
-                                <i data-lucide="git-merge" class="w-3 h-3"></i> 執行進度合併
-                            </button>
-                        </div>
-                    </div>
-                    <div class="divide-y divide-slate-100">
-                `;
-                
-                // 渲染細項
-                items.forEach((item, index) => {
-                    const isNewest = index === 0;
-                    html += `
-                        <div class="p-5 flex gap-4 ${isNewest ? 'bg-amber-50/30' : ''}">
-                            <div class="w-32 shrink-0">
-                                <div class="text-sm font-bold text-slate-700">${item.dateRange}</div>
-                                <div class="text-xs text-slate-500 mt-1 truncate">${item.unit}</div>
-                                ${isNewest ? '<span class="mt-2 inline-block bg-amber-100 text-amber-700 text-[10px] px-2 py-0.5 rounded font-bold">最新紀錄</span>' : ''}
-                            </div>
-                            <div class="flex-1 text-sm text-slate-600 line-clamp-3 preserve-newlines">${item.response}</div>
-                            <div class="shrink-0 flex items-center justify-center">
-                                ${!isNewest ? `
-                                    <button onclick="deleteRecord('${item.id}')" class="text-red-500 hover:text-red-700 hover:bg-red-50 p-2 rounded transition-colors" title="刪除此舊紀錄">
-                                        <i data-lucide="trash-2" class="w-5 h-5"></i>
-                                    </button>
-                                ` : `
-                                    <span class="text-xs text-slate-400 font-bold px-2">建議保留</span>
-                                `}
-                            </div>
-                        </div>
-                    `;
-                });
-                
-                html += `</div>`;
-                groupDiv.innerHTML = html;
-                container.appendChild(groupDiv);
+        function executeDelete() {
+            if (recordToDeleteId) {
+                // 從陣列中移除該筆資料
+                globalDatabase = globalDatabase.filter(item => item.id !== recordToDeleteId);
+                renderDatabase();
+                showToast("已刪除紀錄，請記得同步至雲端", "success");
+                showSyncButton();
+                closeDeleteModal();
             }
-            
-            document.getElementById('modal-duplicate-count').textContent = `需處理 ${totalRedundant} 筆`;
-            lucide.createIcons();
-            
-            if (Object.keys(duplicateData).length === 0) {
-                container.innerHTML = `<div class="text-center py-10 text-slate-400">太棒了！目前沒有偵測到重複的項目。</div>`;
-            }
-        }
-
-        function markAsReviewed(issueText) {
-            globalDatabase.forEach(item => {
-                if (item.issue.trim() === issueText) {
-                    item.reviewed = true;
-                }
-            });
-            renderDatabase(); // 這會重新評估重複項目並關閉不必要的面板
-            
-            // 如果面板還開著，重新渲染面板內容
-            if (!document.getElementById('duplicate-modal').classList.contains('hidden')) {
-                renderDuplicateGroups();
-            }
-            showToast("已確認該爭議，後續將不再提示重複", "success");
-            showSyncButton();
-        }
-
-        function mergeDuplicateRecords(issueText) {
-            const items = duplicateData[issueText];
-            if (!items || items.length < 2) return;
-
-            // 確保依日期排序
-            items.sort((a, b) => b.dateRange.localeCompare(a.dateRange));
-            const newest = items[0];
-            const others = items.filter(i => i.id !== newest.id);
-            
-            let mergedResponse = newest.response;
-            
-            // 將舊資料內容往下疊加
-            others.forEach(item => {
-                mergedResponse += `<br><br><hr><br><strong style="color:#475569;">[歷程合併紀錄 - ${item.dateRange}]</strong><br>${item.response}`;
-                // 從總資料庫中移除被合併掉的舊資料
-                globalDatabase = globalDatabase.filter(d => d.id !== item.id);
-            });
-
-            newest.response = mergedResponse;
-            newest.reviewed = true; // 合併後視為已檢閱
-            
-            renderDatabase();
-            if (!document.getElementById('duplicate-modal').classList.contains('hidden')) {
-                renderDuplicateGroups();
-            }
-            
-            showToast("成功合併相關進度紀錄", "success");
-            showSyncButton();
-        }
-
-        function deleteRecord(id) {
-            globalDatabase = globalDatabase.filter(item => item.id !== id);
-            renderDatabase(); 
-            if (!document.getElementById('duplicate-modal').classList.contains('hidden')) {
-                renderDuplicateGroups();
-            }
-            showToast("已刪除重複紀錄，請記得同步至雲端", "success");
-            showSyncButton();
         }
 
         function showSyncButton() {
@@ -400,9 +247,10 @@
                         const parsedData = parseHtmlTable(htmlString);
                         
                         if(parsedData.length > 0) {
+                            // 單純將新資料加進來，不進行任何複雜的比對防呆
                             globalDatabase = [...parsedData, ...globalDatabase];
                             renderDatabase();
-                            showToast("成功從 Word 匯入 " + parsedData.length + " 筆資料！", "success");
+                            showToast(`成功匯入 ${parsedData.length} 筆資料！`, "success");
                             showSyncButton();
                         } else {
                             showToast("未能從檔案中找到符合格式的表格", "error");
@@ -459,25 +307,12 @@
                         issue = col1.replace(/【.*?】/, '').trim();
                     }
 
-                    let expectedDate = "";
-                    let status = "";
-                    const statusParts = col3.split(/[\s　]+/); 
-                    if(statusParts.length >= 2) {
-                        expectedDate = statusParts[0];
-                        status = statusParts.slice(1).join(" ");
-                    } else {
-                        status = col3;
-                    }
-
                     newData.push({
-                        id: "DOC-" + Date.now() + "-" + i + "-" + Math.floor(Math.random()*1000),
+                        id: "DOC-" + Date.now() + "-" + i + "-" + Math.floor(Math.random()*10000),
                         dateRange: globalDate,
                         unit: unit,
                         issue: issue,
-                        response: col2,
-                        status: status || "持續關注",
-                        expectedDate: expectedDate,
-                        reviewed: false // 預設為未確認
+                        response: col2
                     });
                 }
             }
@@ -489,7 +324,7 @@
             emptyState.classList.remove('hidden');
             emptyState.classList.add('flex');
             emptyState.innerHTML = `<i data-lucide="loader-2" class="w-12 h-12 mb-3 text-slate-400 animate-spin"></i><p>正在從雲端同步歷史資料庫...</p>`;
-            lucide.createIcons();
+            refreshIcons();
 
             try {
                 const response = await fetch(GOOGLE_APP_SCRIPT_URL, {
@@ -501,18 +336,16 @@
                 const data = await response.json();
                 
                 if (data && Array.isArray(data)) {
-                    // 確保讀取下來的資料包含 reviewed 狀態 (為了相容舊資料)
-                    globalDatabase = data.map(item => ({
-                        ...item,
-                        reviewed: item.reviewed === true || item.reviewed === "true"
-                    }));
+                    globalDatabase = data;
+                    document.getElementById('connection-text').textContent = "連線狀態：正常";
                     renderDatabase(); 
-                    showToast("成功載入雲端資料庫", "success");
                 } else {
                     renderDatabase(); 
                 }
             } catch (error) {
                 console.error("Fetch Error:", error);
+                document.getElementById('connection-status').classList.replace('bg-emerald-500', 'bg-red-500');
+                document.getElementById('connection-text').textContent = "無法連線至雲端";
                 emptyState.innerHTML = `
                     <div class="text-red-500 flex flex-col items-center text-center max-w-md">
                         <i data-lucide="shield-alert" class="w-12 h-12 mb-3 opacity-80"></i>
@@ -522,8 +355,8 @@
                             重新嘗試連線
                         </button>
                     </div>`;
-                lucide.createIcons();
-                showToast("讀取雲端資料庫失敗，請確認 GAS 權限", "error");
+                refreshIcons();
+                showToast("讀取雲端資料庫失敗", "error");
             }
         }
 
@@ -532,17 +365,19 @@
 
             const btn = document.getElementById('sync-btn');
             btn.innerHTML = `<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> 同步中...`;
+            btn.classList.remove('animate-pulse');
             
             try {
                 await fetch(GOOGLE_APP_SCRIPT_URL, {
                     method: 'POST',
-                    mode: 'no-cors',
-                    headers: { 'Content-Type': 'application/json' },
+                    // 改用 text/plain 可以繞過瀏覽器嚴格的 CORS 檢查，確保資料順利抵達 GAS
+                    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                     body: JSON.stringify(globalDatabase)
                 });
                 
                 showToast("已成功同步至 Google 試算表！", "success");
                 btn.innerHTML = `<i data-lucide="cloud-check" class="w-4 h-4"></i> 同步完成`;
+                
                 setTimeout(() => {
                     btn.classList.add('hidden');
                     btn.classList.remove('flex');
