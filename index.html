@@ -46,6 +46,12 @@
         <div class="flex items-center gap-3 flex-wrap">
             <div class="text-sm text-slate-500 font-medium px-2" id="record-count">共 0 筆紀錄</div>
             
+            <!-- 新增：專有名詞庫按鈕 -->
+            <button onclick="openDictionaryModal()" class="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 px-4 py-2.5 rounded-md text-sm font-bold transition-colors flex items-center gap-2 shadow-sm border border-indigo-200">
+                <i data-lucide="library" class="w-4 h-4 text-indigo-600"></i>
+                專有名詞庫
+            </button>
+
             <input type="file" id="word-upload" accept=".docx" class="hidden" onchange="handleFileUpload(event)">
             <button onclick="document.getElementById('word-upload').click()" class="bg-slate-200 hover:bg-slate-300 text-slate-800 px-4 py-2.5 rounded-md text-sm font-bold transition-colors flex items-center gap-2 shadow-sm border border-slate-300">
                 <i data-lucide="file-up" class="w-4 h-4 text-slate-600"></i>
@@ -60,6 +66,11 @@
     </header>
 
     <div id="toast-container" class="fixed top-20 left-1/2 transform -translate-x-1/2 z-[100] flex flex-col gap-2 pointer-events-none"></div>
+
+    <!-- 新增：畫重點的浮動工具列 -->
+    <div id="highlight-toolbar" onmousedown="event.preventDefault()" onclick="applyHighlight(event)" class="hidden fixed z-[90] bg-slate-800 text-white px-3 py-2 rounded-lg shadow-xl cursor-pointer flex items-center gap-2 hover:bg-slate-700 transition-colors text-sm font-bold border border-slate-600">
+        <i data-lucide="pen-tool" class="w-4 h-4 text-yellow-400"></i> <span class="tracking-wide">畫重點</span>
+    </div>
 
     <div id="loading-overlay" class="hidden fixed inset-0 bg-slate-900/20 backdrop-blur-sm z-[60] flex flex-col items-center justify-center">
         <div class="bg-white p-6 rounded-xl shadow-xl flex flex-col items-center border border-slate-200">
@@ -105,6 +116,26 @@
             <div class="flex justify-center gap-3">
                 <button onclick="closeDeleteModal()" class="flex-1 py-2.5 rounded-lg text-sm font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-colors">取消</button>
                 <button onclick="executeDelete()" class="flex-1 py-2.5 rounded-lg text-sm font-bold text-white bg-red-500 hover:bg-red-600 shadow-sm transition-colors">確定刪除</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 新增：專有名詞庫面板 Modal -->
+    <div id="dictionary-modal-backdrop" class="hidden fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[70] transition-opacity"></div>
+    <div id="dictionary-modal" class="hidden fixed fixed-center z-[80] w-[90%] max-w-2xl bg-white rounded-2xl shadow-2xl border border-slate-200 flex-col modal-fade-in max-h-[80vh]">
+        <div class="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50 rounded-t-2xl">
+            <div class="flex items-center gap-2 text-indigo-700">
+                <i data-lucide="library" class="w-6 h-6"></i>
+                <h3 class="text-lg font-bold">戰略專有名詞庫</h3>
+            </div>
+            <button onclick="closeDictionaryModal()" class="text-slate-400 hover:text-slate-600 transition-colors p-1 bg-white rounded-md shadow-sm border border-slate-200">
+                <i data-lucide="x" class="w-5 h-5"></i>
+            </button>
+        </div>
+        <div class="p-6 overflow-auto relative">
+            <p class="text-sm text-slate-500 mb-5 font-medium">系統已自動為您統整資料庫中所有「畫過重點」的詞彙，依照出現次數排序。</p>
+            <div id="dictionary-container" class="flex flex-wrap gap-2.5">
+                <!-- 名詞標籤將由 JS 動態產生 -->
             </div>
         </div>
     </div>
@@ -178,9 +209,10 @@
                         </div>
                     </td>
                     <td class="py-5 px-6 align-top">
-                        <div class="font-bold text-slate-800 leading-relaxed">${row.issue}</div>
+                        <!-- 加入 highlightable 類別與資料綁定，讓系統知道這是可以畫重點的區域 -->
+                        <div class="font-bold text-slate-800 leading-relaxed highlightable" data-id="${row.id}" data-field="issue">${row.issue}</div>
                     </td>
-                    <td class="py-5 px-6 align-top text-sm text-slate-700 leading-relaxed pr-8 preserve-newlines">${row.response}</td>
+                    <td class="py-5 px-6 align-top text-sm text-slate-700 leading-relaxed pr-8 preserve-newlines highlightable" data-id="${row.id}" data-field="response">${row.response}</td>
                     
                     <td class="py-5 px-4 align-top text-center">
                         <button onclick="confirmDelete('${row.id}')" class="text-slate-400 hover:text-red-500 hover:bg-red-50 p-2 rounded-lg transition-colors border border-transparent hover:border-red-200" title="刪除此紀錄">
@@ -370,7 +402,6 @@
             try {
                 await fetch(GOOGLE_APP_SCRIPT_URL, {
                     method: 'POST',
-                    // 改用 text/plain 可以繞過瀏覽器嚴格的 CORS 檢查，確保資料順利抵達 GAS
                     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                     body: JSON.stringify(globalDatabase)
                 });
@@ -389,6 +420,180 @@
                 btn.innerHTML = `<i data-lucide="cloud-upload" class="w-4 h-4"></i> 重新同步`;
             }
         }
+
+        // --- 以下為新增核心：畫重點功能 (Highlighter) ---
+        let currentSelectionRange = null;
+
+        // 偵測文字選取
+        function handleTextSelection(e) {
+            // 如果點擊的是工具列本身或已經畫重點的文字，不觸發
+            if (e.target.closest('#highlight-toolbar') || e.target.tagName === 'MARK') return;
+
+            const selection = window.getSelection();
+            const toolbar = document.getElementById('highlight-toolbar');
+
+            if (selection && selection.toString().trim().length > 0) {
+                const range = selection.getRangeAt(0);
+                const container = range.commonAncestorContainer;
+                // 尋找是否在允許畫重點的儲存格內
+                const fieldNode = container.nodeType === 3 ? container.parentNode.closest('.highlightable') : container.closest('.highlightable');
+
+                if (fieldNode) {
+                    currentSelectionRange = range;
+                    const rect = range.getBoundingClientRect();
+                    
+                    // 將工具列浮動定位在選取文字的正上方
+                    toolbar.style.top = `${rect.top - 45}px`;
+                    toolbar.style.left = `${rect.left + (rect.width / 2)}px`;
+                    toolbar.style.transform = 'translateX(-50%)';
+                    toolbar.classList.remove('hidden');
+                    return;
+                }
+            }
+            hideHighlightToolbar();
+        }
+
+        function hideHighlightToolbar() {
+            const toolbar = document.getElementById('highlight-toolbar');
+            toolbar.classList.add('hidden');
+        }
+
+        // 執行畫重點
+        function applyHighlight(e) {
+            if(e) e.preventDefault(); // 防止點擊按鈕時失去文字選取焦點
+            if (!currentSelectionRange) return;
+
+            const selection = window.getSelection();
+            const container = currentSelectionRange.commonAncestorContainer;
+            const fieldNode = container.nodeType === 3 ? container.parentNode.closest('.highlightable') : container.closest('.highlightable');
+
+            if (!fieldNode) return;
+
+            const mark = document.createElement('mark');
+            // 使用 Tailwind class 打造黃色高光樣式，並提示可點擊移除
+            mark.className = 'bg-yellow-300 text-slate-900 px-1 rounded cursor-pointer transition-colors hover:bg-red-200 hover:text-red-800';
+            mark.title = "點擊移除此重點";
+
+            try {
+                // 將選取的文字用 mark 標籤包裝起來
+                currentSelectionRange.surroundContents(mark);
+            } catch (err) {
+                showToast("無法跨越段落畫重點，請分段選取", "error");
+                hideHighlightToolbar();
+                return;
+            }
+
+            // [關鍵] 將包含 HTML 標籤(重點)的內容，寫回全域資料庫陣列
+            const id = fieldNode.dataset.id;
+            const field = fieldNode.dataset.field;
+            const targetRow = globalDatabase.find(r => r.id === id);
+            if (targetRow) {
+                targetRow[field] = fieldNode.innerHTML;
+                showSyncButton(); // 喚醒同步按鈕
+            }
+
+            selection.removeAllRanges(); // 取消文字反白
+            hideHighlightToolbar();
+            refreshIcons();
+        }
+
+        // 點擊已經畫重點的文字 -> 剝除標籤 (復原)
+        document.addEventListener('click', (e) => {
+            if (e.target.tagName === 'MARK') {
+                const fieldNode = e.target.closest('.highlightable');
+                if (fieldNode) {
+                    // 將 mark 標籤剝掉，只留下裡面的純文字
+                    e.target.outerHTML = e.target.innerHTML; 
+                    
+                    // 同步寫回資料庫
+                    const id = fieldNode.dataset.id;
+                    const field = fieldNode.dataset.field;
+                    const targetRow = globalDatabase.find(r => r.id === id);
+                    if (targetRow) {
+                        targetRow[field] = fieldNode.innerHTML;
+                        showSyncButton();
+                    }
+                }
+            }
+        });
+
+        // 監聽全域的滑鼠放開與點擊事件
+        document.addEventListener('mouseup', handleTextSelection);
+        document.addEventListener('mousedown', (e) => {
+            // 如果在畫面其他地方點擊，隱藏工具列
+            if (!e.target.closest('#highlight-toolbar')) {
+                hideHighlightToolbar();
+            }
+        });
+
+        // --- 新增：專有名詞庫的核心邏輯 ---
+        function openDictionaryModal() {
+            renderDictionary();
+            document.getElementById('dictionary-modal-backdrop').classList.remove('hidden');
+            const modal = document.getElementById('dictionary-modal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function closeDictionaryModal() {
+            document.getElementById('dictionary-modal-backdrop').classList.add('hidden');
+            const modal = document.getElementById('dictionary-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+
+        function renderDictionary() {
+            const container = document.getElementById('dictionary-container');
+            container.innerHTML = '';
+            
+            // 用來計算每個詞彙出現的次數
+            const termCounts = {};
+            
+            // 掃描全域資料庫
+            globalDatabase.forEach(row => {
+                const textToScan = (row.issue || "") + " " + (row.response || "");
+                
+                // 建立虛擬 DOM 來解析 HTML，準確抓出 <mark> 標籤
+                const tempDiv = document.createElement('div');
+                tempDiv.innerHTML = textToScan;
+                
+                const marks = tempDiv.querySelectorAll('mark');
+                marks.forEach(mark => {
+                    const term = mark.textContent.trim();
+                    if (term) {
+                        termCounts[term] = (termCounts[term] || 0) + 1;
+                    }
+                });
+            });
+
+            // 依照次數由高到低排序
+            const sortedTerms = Object.keys(termCounts).sort((a, b) => termCounts[b] - termCounts[a]);
+
+            if (sortedTerms.length === 0) {
+                container.innerHTML = `
+                    <div class="w-full py-10 flex flex-col items-center justify-center text-slate-400">
+                        <i data-lucide="inbox" class="w-12 h-12 mb-3 opacity-30"></i>
+                        <p class="font-bold">目前名詞庫是空的</p>
+                        <p class="text-sm mt-1">只要在主畫面將重要文字「畫重點」，這裡就會自動收錄喔！</p>
+                    </div>`;
+                refreshIcons();
+                return;
+            }
+
+            // 產生標籤 UI
+            sortedTerms.forEach(term => {
+                const count = termCounts[term];
+                const tag = document.createElement('div');
+                tag.className = 'flex items-center gap-2 bg-white border border-indigo-200 text-indigo-900 px-3 py-1.5 rounded-lg text-sm font-bold shadow-sm hover:border-indigo-400 hover:shadow-md transition-all cursor-default';
+                tag.innerHTML = `
+                    <span>${term}</span>
+                    <span class="bg-indigo-100 text-indigo-700 text-xs py-0.5 px-2 rounded-md">${count}</span>
+                `;
+                container.appendChild(tag);
+            });
+            refreshIcons();
+        }
+        // --- 專有名詞庫功能結束 ---
 
         window.onload = function() {
             fetchFromGoogleSheets();
